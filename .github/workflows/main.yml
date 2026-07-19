@@ -18,7 +18,7 @@ jobs:
       with:
         node-version: '20'
 
-    - name: Build APK - FIXED
+    - name: Build APK - Ultimate Fix
       run: |
         rm -rf www android node_modules package-lock.json
         mkdir -p www
@@ -26,16 +26,16 @@ jobs:
         npm init -y
         npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
         
-        # FIXED: removed --npm-client flag
         npx cap init "TV Remote" "com.samsung.remote" --web-dir=www
         
+        # Clean config file that loads over a safe internal http scheme to avoid local blockages
         cat > capacitor.config.json <<EOF
         {
           "appId": "com.samsung.remote",
           "appName": "TV Remote",
           "webDir": "www",
           "server": {
-            "androidScheme": "https",
+            "androidScheme": "http",
             "cleartext": true
           }
         }
@@ -44,33 +44,22 @@ jobs:
         npx cap add android
         npx cap sync android
         
-        sed -i 's/<application/<application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
+        # 1. Allow cleartext traffic in the manifest
+        sed -i 's/<application/<application android:usesCleartextTraffic="true" android:networkSecurityConfig="@xml\/network_security_config"/' android/app/src/main/AndroidManifest.xml
         
-        MAIN=android/app/src/main/java/com/samsung/remote/MainActivity.java
-        cat > $MAIN <<'JAVA'
-        package com.samsung.remote;
-        import android.os.Bundle;
-        import android.webkit.WebView;
-        import android.webkit.SslErrorHandler;
-        import android.net.http.SslError;
-        import android.webkit.WebViewClient;
-        import com.getcapacitor.BridgeActivity;
-        public class MainActivity extends BridgeActivity {
-            @Override
-            public void onCreate(Bundle savedInstanceState) {
-                super.onCreate(savedInstanceState);
-                WebView wv = getBridge().getWebView();
-                wv.getSettings().setMixedContentMode(0);
-                wv.getSettings().setDomStorageEnabled(true);
-                wv.setWebViewClient(new WebViewClient() {
-                    @Override
-                    public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                        handler.proceed();
-                    }
-                });
-            }
-        }
-        JAVA
+        # 2. Create an Android Network Security Bypass rule for local devices
+        mkdir -p android/app/src/main/res/xml
+        cat > android/app/src/main/res/xml/network_security_config.xml <<EOF
+        <?xml version="1.0" encoding="utf-8"?>
+        <network-security-config>
+            <base-config cleartextTrafficAllowed="true">
+                <trust-anchors>
+                    <certificates src="system" />
+                    <certificates src="user" />
+                </trust-anchors>
+            </base-config>
+        </network-security-config>
+        EOF
 
     - name: Compile APK
       working-directory: android
@@ -80,5 +69,5 @@ jobs:
 
     - uses: actions/upload-artifact@v4
       with:
-        name: Samsung-Remote-APK-FIXED
+        name: Samsung-Remote-APK-FINAL
         path: android/app/build/outputs/apk/debug/*.apk

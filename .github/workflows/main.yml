@@ -10,82 +10,80 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-
     - uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
-
     - uses: actions/setup-node@v4
       with:
         node-version: '20'
 
-    - name: Wrap HTML with Capacitor
+    - name: Build APK - FIXED for ERR_CONNECTION_REFUSED
       run: |
+        # Clean old builds
+        rm -rf www android node_modules package-lock.json
+        
         mkdir -p www
         cp index.html www/
+        
         npm init -y
         npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
-        npx cap init "TV Remote" "com.samsung.remote" --web-dir=www
+        
+        npx cap init "TV Remote" "com.samsung.remote" --web-dir=www --npm-client npm
+        
+        # FIX: Keep https (fixes your screenshot) + allow cleartext for TV
         cat > capacitor.config.json <<EOF
         {
           "appId": "com.samsung.remote",
           "appName": "TV Remote",
           "webDir": "www",
           "server": {
-            "androidScheme": "http",
-            "cleartext": true,
-            "allowNavigation": ["*"]
-          },
-          "android": {
-            "allowMixedContent": true
+            "androidScheme": "https",
+            "cleartext": true
           }
         }
         EOF
+        
         npx cap add android
         npx cap sync android
-
-    - name: Patch Android for Samsung TV ws:// + wss:// self-signed
-      run: |
-        MANIFEST=android/app/src/main/AndroidManifest.xml
-        if ! grep -q "usesCleartextTraffic" $MANIFEST; then
-          sed -i 's/<application/<application android:usesCleartextTraffic="true"/' $MANIFEST
-        fi
-
+        
+        # 1. Allow cleartext traffic AFTER sync
+        sed -i 's/<application/<application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
+        
+        # 2. This is the real fix for Samsung ws:// + wss:// self-signed
         MAIN=android/app/src/main/java/com/samsung/remote/MainActivity.java
         cat > $MAIN <<'JAVA'
         package com.samsung.remote;
         import android.os.Bundle;
         import android.webkit.WebView;
-        import com.getcapacitor.BridgeActivity;
         import android.webkit.SslErrorHandler;
         import android.net.http.SslError;
         import android.webkit.WebViewClient;
-
+        import com.getcapacitor.BridgeActivity;
         public class MainActivity extends BridgeActivity {
             @Override
             public void onCreate(Bundle savedInstanceState) {
                 super.onCreate(savedInstanceState);
                 WebView wv = getBridge().getWebView();
-                wv.getSettings().setMixedContentMode(0); // MIXED_CONTENT_ALWAYS_ALLOW
+                wv.getSettings().setMixedContentMode(0); // ALWAYS_ALLOW
+                wv.getSettings().setDomStorageEnabled(true);
                 wv.setWebViewClient(new WebViewClient() {
                     @Override
                     public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                        handler.proceed(); // REQUIRED for Samsung wss://:8002 self-signed cert on local network
+                        handler.proceed(); // Allow Samsung TV self-signed cert on 8002
                     }
                 });
             }
         }
         JAVA
 
-    - name: Build APK
+    - name: Compile APK
       working-directory: android
       run: |
         chmod +x gradlew
         ./gradlew assembleDebug --stacktrace
 
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v4
       with:
-        name: Samsung-Remote-APK
+        name: Samsung-Remote-APK-FIXED
         path: android/app/build/outputs/apk/debug/*.apk

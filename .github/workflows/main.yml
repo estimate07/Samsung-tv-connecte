@@ -8,69 +8,83 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
+    - uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
+    - uses: actions/setup-node@v4
       with:
         node-version: '20'
 
-    - name: Auto-Wrap HTML & Fix Mixed Content Block
+    - name: Wrap HTML with Capacitor
       run: |
         mkdir -p www
         cp index.html www/
         npm init -y
         npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
-        
-        # Initialize Capacitor
-        npx cap init "TV Remote" "com.samsung.remote" --web-dir www
-        
-        # THE FIX: Force Capacitor to use HTTP instead of HTTPS to prevent 
-        # the Android WebView from blocking the TV's unencrypted ws:// signal!
-        cat <<EOF > capacitor.config.json
+        npx cap init "TV Remote" "com.samsung.remote" --web-dir=www
+        cat > capacitor.config.json <<EOF
         {
           "appId": "com.samsung.remote",
           "appName": "TV Remote",
           "webDir": "www",
           "server": {
             "androidScheme": "http",
-            "cleartext": true
+            "cleartext": true,
+            "allowNavigation": ["*"]
+          },
+          "android": {
+            "allowMixedContent": true
           }
         }
         EOF
-        
         npx cap add android
-
-    - name: Bypass Android Network Security
-      run: |
-        # Allow cleartext traffic in the Android Manifest
-        sed -i 's/<application/<application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
-        
-        # Sync the custom config into the native Android folders
         npx cap sync android
 
-    - name: Boost Memory & Make Executable
+    - name: Patch Android for Samsung TV ws:// + wss:// self-signed
+      run: |
+        MANIFEST=android/app/src/main/AndroidManifest.xml
+        if ! grep -q "usesCleartextTraffic" $MANIFEST; then
+          sed -i 's/<application/<application android:usesCleartextTraffic="true"/' $MANIFEST
+        fi
+
+        MAIN=android/app/src/main/java/com/samsung/remote/MainActivity.java
+        cat > $MAIN <<'JAVA'
+        package com.samsung.remote;
+        import android.os.Bundle;
+        import android.webkit.WebView;
+        import com.getcapacitor.BridgeActivity;
+        import android.webkit.SslErrorHandler;
+        import android.net.http.SslError;
+        import android.webkit.WebViewClient;
+
+        public class MainActivity extends BridgeActivity {
+            @Override
+            public void onCreate(Bundle savedInstanceState) {
+                super.onCreate(savedInstanceState);
+                WebView wv = getBridge().getWebView();
+                wv.getSettings().setMixedContentMode(0); // MIXED_CONTENT_ALWAYS_ALLOW
+                wv.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+                        handler.proceed(); // REQUIRED for Samsung wss://:8002 self-signed cert on local network
+                    }
+                });
+            }
+        }
+        JAVA
+
+    - name: Build APK
       working-directory: android
       run: |
-        mkdir -p ~/.gradle
-        echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8" > ~/.gradle/gradle.properties
         chmod +x gradlew
+        ./gradlew assembleDebug --stacktrace
 
-    - name: Build debug APK
-      working-directory: android
-      run: ./gradlew assembleDebug --stacktrace
-
-    - name: Upload APK Artifact
+    - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: Samsung-Remote-APK

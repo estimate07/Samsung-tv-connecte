@@ -18,20 +18,17 @@ jobs:
       with:
         node-version: '20'
 
-    - name: Build APK - FIXED for ERR_CONNECTION_REFUSED
+    - name: Build APK - FIXED
       run: |
-        # Clean old builds
         rm -rf www android node_modules package-lock.json
-        
         mkdir -p www
         cp index.html www/
-        
         npm init -y
         npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
         
-        npx cap init "TV Remote" "com.samsung.remote" --web-dir=www --npm-client npm
+        # FIXED: removed --npm-client flag
+        npx cap init "TV Remote" "com.samsung.remote" --web-dir=www
         
-        # FIX: Keep https (fixes your screenshot) + allow cleartext for TV
         cat > capacitor.config.json <<EOF
         {
           "appId": "com.samsung.remote",
@@ -47,10 +44,8 @@ jobs:
         npx cap add android
         npx cap sync android
         
-        # 1. Allow cleartext traffic AFTER sync
         sed -i 's/<application/<application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
         
-        # 2. This is the real fix for Samsung ws:// + wss:// self-signed
         MAIN=android/app/src/main/java/com/samsung/remote/MainActivity.java
         cat > $MAIN <<'JAVA'
         package com.samsung.remote;
@@ -65,12 +60,12 @@ jobs:
             public void onCreate(Bundle savedInstanceState) {
                 super.onCreate(savedInstanceState);
                 WebView wv = getBridge().getWebView();
-                wv.getSettings().setMixedContentMode(0); // ALWAYS_ALLOW
+                wv.getSettings().setMixedContentMode(0);
                 wv.getSettings().setDomStorageEnabled(true);
                 wv.setWebViewClient(new WebViewClient() {
                     @Override
                     public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                        handler.proceed(); // Allow Samsung TV self-signed cert on 8002
+                        handler.proceed();
                     }
                 });
             }

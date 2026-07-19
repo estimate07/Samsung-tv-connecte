@@ -33,12 +33,17 @@ jobs:
         npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
         npx cap init "TV Remote" "com.samsung.remote" --web-dir www
         npx cap add android
-        npx cap sync android
 
-    - name: Bypass Android Network Security (Allow TV Connection)
+    - name: Bypass SSL Certificate Block (The TV Hack)
       run: |
-        # Injects the rule to allow unencrypted local network signals (ws://)
+        # Forces the Android WebView to blindly accept the TV's self-signed WSS certificate
+        sed -i 's/handler.cancel()/handler.proceed()/g' node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/BridgeWebViewClient.java
+        
+        # Forces Android to allow standard WS cleartext traffic
         sed -i 's/<application/<application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
+
+    - name: Sync Android Code
+      run: npx cap sync android
 
     - name: Boost Memory & Make Executable
       working-directory: android

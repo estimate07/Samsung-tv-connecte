@@ -22,13 +22,12 @@ jobs:
       run: |
         rm -rf www android node_modules package-lock.json
         mkdir -p www
-        cp index.html www/
+        cp samsung_tv_remote_single.html www/index.html
         npm init -y
         npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
-        
+
         npx cap init "TV Remote" "com.samsung.remote" --web-dir=www
-        
-        # Clean config file that loads over a safe internal http scheme to avoid local blockages
+
         cat > capacitor.config.json <<EOF
         {
           "appId": "com.samsung.remote",
@@ -40,14 +39,12 @@ jobs:
           }
         }
         EOF
-        
+
         npx cap add android
         npx cap sync android
-        
-        # 1. Allow cleartext traffic in the manifest
+
         sed -i 's/<application/<application android:usesCleartextTraffic="true" android:networkSecurityConfig="@xml\/network_security_config"/' android/app/src/main/AndroidManifest.xml
-        
-        # 2. Create an Android Network Security Bypass rule for local devices
+
         mkdir -p android/app/src/main/res/xml
         cat > android/app/src/main/res/xml/network_security_config.xml <<EOF
         <?xml version="1.0" encoding="utf-8"?>

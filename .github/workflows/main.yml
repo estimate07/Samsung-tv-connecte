@@ -22,7 +22,19 @@ jobs:
       run: |
         rm -rf www android node_modules package-lock.json
         mkdir -p www
-        cp samsung_tv_remote_single.html www/index.html
+
+        echo "Repo root contents:"
+        ls -la
+
+        HTML_FILE=$(find . -maxdepth 1 -name "*.html" | head -n 1)
+        if [ -z "$HTML_FILE" ]; then
+          echo "ERROR: No .html file found in repo root on branch 'main'."
+          echo "This means the file was never committed/pushed to this repo — not a naming issue."
+          exit 1
+        fi
+        echo "Using HTML file: $HTML_FILE"
+        cp "$HTML_FILE" www/index.html
+
         npm init -y
         npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
 
